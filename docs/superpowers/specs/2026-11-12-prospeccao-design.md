@@ -22,7 +22,7 @@ Plugin completo para o Hermes Desktop que cobre a prospecção fria de sites: bu
 
 ## Pipeline
 
-Busca (gosom, Scrapling, Firecrawl) → Classifica e filtra → Landing page → Publica → Comunicação.
+Busca (gosom, Scrapling, Firecrawl) → Classifica e filtra → Landing page → Publica.
 
 ## Componentes
 
@@ -33,11 +33,7 @@ Busca (gosom, Scrapling, Firecrawl) → Classifica e filtra → Landing page →
 
 ## Comunicação
 
-- Gera rascunho de e-mail e WhatsApp por lead, com o link da landing.
-- Usuário aprova em lote ou um a um.
-- Envio pelo canal escolhido após aprovação: `hermes-whatsapp` para WhatsApp; conector iCloud `send_email` ou himalaya para e-mail.
-- Status por lead: rascunho, aprovado, enviado, respondeu, opt-out.
-- Opt-out bloqueia novos envios ao lead.
+configuração dentro do painel; envio pendente de transporte confirmado.
 
 ## Webhook (futuro)
 

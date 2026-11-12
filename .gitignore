@@ -2,3 +2,6 @@ __pycache__/
 .pytest_cache/
 .superpowers/
 node_modules/
+plugin/prospeccao/config.json
+plugin/prospeccao/leads.db
+plugin/prospeccao/sites/
