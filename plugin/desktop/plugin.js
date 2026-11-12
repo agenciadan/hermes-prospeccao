@@ -15,18 +15,40 @@ const SELECT = 'h-7 rounded-md border border-(--ui-stroke-secondary) bg-transpar
 // Filhos variádicos, como createElement.
 const h = (tipo, props, ...filhos) => jsxs(tipo, { ...props, children: filhos.flat() });
 const num = (texto) => (texto.trim() === '' ? null : Number(texto)); // campo vazio vira null, nunca 0
-const erroDe = (e) => e?.message || String(e);
+// Backend responde '400: {"detail":...}'; mostra só o detail/message quando existir.
+const erroDe = (e) => {
+  const texto = e?.message || String(e);
+  try {
+    const d = JSON.parse(texto.replace(/^\d{3}:\s*/, ''));
+    const m = d?.detail ?? d?.message;
+    return typeof m === 'string' ? m : texto;
+  } catch {
+    return texto;
+  }
+};
 const sitio = (t) => (t === true ? 'sim' : t === false ? 'não' : 'não medido'); // None = não medido
 const aviso = (m) => m && h('div', null, m.ok ? m.texto : `Erro: ${m.texto}`);
 const campo = (rotulo, controle) =>
   h('label', { className: 'flex flex-col gap-1' }, h('span', { className: 'text-xs text-(--ui-text-tertiary)' }, rotulo), controle);
 const opcoesConfig = (ctx) => ({ queryKey: ['prospeccao', 'config'], queryFn: () => ctx.rest('/config'), retry: false });
+const CANAIS = [['email', 'E-mail'], ['whatsapp', 'WhatsApp']];
+const PROVEDORES = [['vercel', 'Vercel'], ['cloudflare', 'Cloudflare']];
+const OPCOES_CAMPO = { canal_padrao: CANAIS, publicar_provedor_padrao: PROVEDORES };
+// Valor nulo, vazio ou fora das opções mostra 'escolha', não a 1ª opção como se estivesse salva.
+const selecao = (valor, onChange, opcoes) =>
+  h(
+    'select',
+    { value: valor, onChange, className: SELECT },
+    opcoes.some(([v]) => v === valor) ? null : h('option', { value: '' }, 'escolha'),
+    ...opcoes.map(([v, r]) => h('option', { value: v }, r)),
+  );
 
 function LeadsTab({ ctx }) {
   const qc = useQueryClient();
   const [status, setStatus] = useState('');
   const [msg, setMsg] = useState(null);
   const [pend, setPend] = useState(null); // primeiro clique arma ('acao:place_id' ou 'busca'), segundo executa
+  const [ocupado, setOcupado] = useState(null); // chave da ação em curso: enquanto houver uma, nada mais dispara
   const [urls, setUrls] = useState({});
   const [rascunhos, setRascunhos] = useState({});
   const [busca, setBusca] = useState({ nicho: '', cidade: '', lat: '', lon: '' });
@@ -39,8 +61,9 @@ function LeadsTab({ ctx }) {
   const lista = (leads.data ?? []).filter((l) => status !== OPTOUT || l.optout);
 
   // Erro do backend vira mensagem no pane; sucesso invalida o cache de prospecção.
-  async function rodar(fn, ok) {
-    setPend(null);
+  // Uma ação por vez: com 'ocupado' definido, todos os botões ficam desabilitados.
+  async function rodar(chave, fn, ok) {
+    setOcupado(chave);
     try {
       const r = await fn();
       setMsg({ ok: true, texto: ok(r) });
@@ -48,16 +71,18 @@ function LeadsTab({ ctx }) {
       return r;
     } catch (e) {
       setMsg({ ok: false, texto: erroDe(e) });
+    } finally {
+      setPend(null);
+      setOcupado(null);
     }
   }
 
+  const botao = (chave, rotulo, onClick, variant = 'outline') =>
+    h(Button, { size: 'xs', variant, disabled: ocupado !== null, onClick }, ocupado === chave ? 'Aguarde...' : rotulo);
+
   const dois = (chave, rotulo, confirmaRotulo, fn, ok) => {
     const armado = pend === chave;
-    return h(
-      Button,
-      { size: 'xs', variant: armado ? 'default' : 'outline', onClick: () => (armado ? rodar(fn, ok) : setPend(chave)) },
-      armado ? confirmaRotulo : rotulo,
-    );
+    return botao(chave, armado ? confirmaRotulo : rotulo, () => (armado ? rodar(chave, fn, ok) : setPend(chave)), armado ? 'default' : 'outline');
   };
 
   function linha(lead) {
@@ -65,7 +90,7 @@ function LeadsTab({ ctx }) {
     const publicando = pend === `publicar:${id}`;
     return h(
       'li',
-      { className: 'flex flex-col gap-1 border-b border-(--ui-stroke-secondary) py-2' },
+      { key: id, className: 'flex flex-col gap-1 border-b border-(--ui-stroke-secondary) py-2' },
       h('div', { className: 'font-medium' }, lead.nome || '(sem nome)'),
       h(
         'div',
@@ -86,26 +111,18 @@ function LeadsTab({ ctx }) {
             return `Publicado: ${r.url}`;
           },
         ),
-        h(
-          Button,
-          {
-            size: 'xs',
-            variant: 'outline',
-            onClick: () =>
-              rodar(
-                () => ctx.rest('/rascunho', { method: 'POST', body: { place_id: id, url: urls[id] } }),
-                (r) => {
-                  setRascunhos((x) => ({ ...x, [id]: r }));
-                  return 'Rascunho gerado. Nada foi enviado.';
-                },
-              ),
-          },
-          'Rascunho',
+        botao(`rascunho:${id}`, 'Rascunho', () =>
+          rodar(
+            `rascunho:${id}`,
+            () => ctx.rest('/rascunho', { method: 'POST', body: { place_id: id, url: urls[id] } }),
+            (r) => {
+              setRascunhos((x) => ({ ...x, [id]: r }));
+              return 'Rascunho gerado. Nada foi enviado.';
+            },
+          ),
         ),
-        h(
-          Button,
-          { size: 'xs', variant: 'outline', onClick: () => rodar(() => ctx.rest('/optout', { method: 'POST', body: { place_id: id } }), () => 'Opt-out registrado.') },
-          'Opt-out',
+        botao(`optout:${id}`, 'Opt-out', () =>
+          rodar(`optout:${id}`, () => ctx.rest('/optout', { method: 'POST', body: { place_id: id } }), () => 'Opt-out registrado.'),
         ),
       ),
       publicando &&
@@ -122,6 +139,17 @@ function LeadsTab({ ctx }) {
   const campoBusca = (chave, rotulo) =>
     campo(rotulo, h(Input, { value: busca[chave], onChange: (e) => setBusca((b) => ({ ...b, [chave]: e.target.value })) }));
   const armadoBusca = pend === 'busca';
+  // lat/lon preenchidos mas não numéricos são erro próprio; vazio continua valendo como null (o backend exige)
+  const confirmarBusca = () => {
+    const lat = num(busca.lat);
+    const lon = num(busca.lon);
+    if ([lat, lon].some((v) => v !== null && !Number.isFinite(v))) return setMsg({ ok: false, texto: 'lat/lon inválidos' });
+    return rodar(
+      'busca',
+      () => ctx.rest('/busca', { method: 'POST', body: { nicho: busca.nicho, cidade: busca.cidade, lat, lon, confirmar: true } }),
+      (r) => `${r.gravados} lead(s) gravado(s).`,
+    );
+  };
 
   let conteudo;
   if (leads.isLoading) conteudo = 'Carregando leads…';
@@ -140,26 +168,12 @@ function LeadsTab({ ctx }) {
       h(
         'div',
         { className: 'flex flex-wrap items-center gap-2' },
-        h(
-          Button,
-          {
-            size: 'xs',
-            variant: armadoBusca ? 'default' : 'outline',
-            onClick: () =>
-              armadoBusca
-                ? rodar(
-                    () => ctx.rest('/busca', { method: 'POST', body: { nicho: busca.nicho, cidade: busca.cidade, lat: num(busca.lat), lon: num(busca.lon), confirmar: true } }),
-                    (r) => `${r.gravados} lead(s) gravado(s).`,
-                  )
-                : setPend('busca'),
-          },
-          armadoBusca ? 'Confirmar busca' : 'Buscar',
-        ),
+        botao('busca', armadoBusca ? 'Confirmar busca' : 'Buscar', () => (armadoBusca ? confirmarBusca() : setPend('busca')), armadoBusca ? 'default' : 'outline'),
         armadoBusca && h('span', { className: 'text-xs text-(--ui-text-tertiary)' }, 'Consulta a fonte externa (gosom) e grava os leads.'),
       ),
     ),
     h(
-      'div',
+      'label',
       { className: 'flex items-center gap-2' },
       h('span', { className: 'text-xs text-(--ui-text-tertiary)' }, 'Status'),
       h(
@@ -184,7 +198,9 @@ function ConfigForm({ inicial, ctx }) {
   async function salvar() {
     setSalvando(true);
     try {
-      await ctx.rest('/config', { method: 'PUT', body: valores });
+      // PUT é parcial: select sem valor válido não é enviado (o backend recusaria '').
+      const corpo = Object.fromEntries(Object.entries(valores).filter(([c, v]) => v !== '' || !(c in OPCOES_CAMPO)));
+      await ctx.rest('/config', { method: 'PUT', body: corpo });
       setMsg({ ok: true, texto: 'Configuração salva.' });
       qc.invalidateQueries({ queryKey: ['prospeccao', 'config'] });
     } catch (e) {
@@ -198,22 +214,11 @@ function ConfigForm({ inicial, ctx }) {
     'div',
     { className: 'flex flex-col gap-3' },
     h('div', { className: 'text-xs text-(--ui-text-tertiary)' }, AVISO_ENVIO),
-    campo(
-      'Canal padrão',
-      h('select', { value: valores.canal_padrao, onChange: set('canal_padrao'), className: SELECT }, h('option', { value: 'email' }, 'E-mail'), h('option', { value: 'whatsapp' }, 'WhatsApp')),
-    ),
+    campo('Canal padrão', selecao(valores.canal_padrao, set('canal_padrao'), CANAIS)),
     campo('Remetente (e-mail)', h(Input, { value: valores.remetente_email, onChange: set('remetente_email') })),
     campo('Assunto padrão', h(Input, { value: valores.assunto_padrao, onChange: set('assunto_padrao') })),
     campo('Modelo de mensagem (use {nome} e {url})', h(Textarea, { rows: 4, value: valores.modelo_mensagem, onChange: set('modelo_mensagem') })),
-    campo(
-      'Provedor de publicação (externo)',
-      h(
-        'select',
-        { value: valores.publicar_provedor_padrao, onChange: set('publicar_provedor_padrao'), className: SELECT },
-        h('option', { value: 'vercel' }, 'Vercel'),
-        h('option', { value: 'cloudflare' }, 'Cloudflare'),
-      ),
-    ),
+    campo('Provedor de publicação (externo)', selecao(valores.publicar_provedor_padrao, set('publicar_provedor_padrao'), PROVEDORES)),
     h('div', { className: 'flex items-center gap-2' }, h(Button, { size: 'xs', disabled: salvando, onClick: salvar }, 'Salvar'), aviso(msg)),
   );
 }
