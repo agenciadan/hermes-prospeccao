@@ -12,6 +12,9 @@ class SourceError(Exception):
     pass
 
 
+STATUS_FALHA = {"failed", "error", "cancelled", "canceled"}
+
+
 def _http(metodo, url, corpo=None):  # único ponto de rede: os testes trocam esta função
     req = urllib.request.Request(url, data=corpo, method=metodo, headers={"Content-Type": "application/json"})
     try:
@@ -32,17 +35,24 @@ def _txt(valor):
     return (valor or "").strip() or None
 
 
+def _numero(valor, tipo):
+    # R26: não numérico ('N/A') ou ausente = não medido = None
+    try:
+        return tipo(valor)
+    except (TypeError, ValueError):
+        return None
+
+
 def _lead(row, nicho, cidade):
     # R22: chave = place_id, senão data_id, senão sha1(nome|endereço|cidade)
     chave = (row.get("place_id") or "").strip() or (row.get("data_id") or "").strip()
     if not chave:
         base = f"{(row.get('title') or '').strip()}|{(row.get('address') or '').strip()}|{cidade}"
         chave = hashlib.sha1(base.encode()).hexdigest()
-    nota = _txt(row.get("review_rating"))
-    avaliacoes = _txt(row.get("review_count"))
     return {
         "place_id": chave, "nome": _txt(row.get("title")), "nicho": nicho, "cidade": cidade,
-        "nota": float(nota) if nota else None, "avaliacoes": int(avaliacoes) if avaliacoes else None,
+        "nota": _numero(_txt(row.get("review_rating")), float),
+        "avaliacoes": _numero(_txt(row.get("review_count")), int),
         "site_url": _txt(row.get("website")), "telefone": _txt(row.get("phone")),
         "email": _txt(row.get("emails")), "fonte": "gosom",
     }
@@ -62,7 +72,12 @@ def buscar(nicho, cidade, fonte, lat=None, lon=None, timeout=20 * 60, intervalo=
                             "lat": str(lat), "lon": str(lon), "max_time": int(timeout)}).encode()
         job_id = json.loads(_req("POST", f"{base}/api/v1/jobs", corpo))["id"]
         prazo = time.monotonic() + timeout
-        while json.loads(_req("GET", f"{base}/api/v1/jobs/{job_id}"))["Status"] != "ok":
+        while True:
+            status = json.loads(_req("GET", f"{base}/api/v1/jobs/{job_id}"))["Status"]
+            if status == "ok":  # R27: ok no último ciclo é aceito, mesmo após o prazo
+                break
+            if status in STATUS_FALHA:  # R25: falha terminal não espera o prazo
+                raise SourceError(f"gosom: job {job_id} terminou com status {status}")
             if time.monotonic() >= prazo:
                 raise SourceError(f"gosom: job {job_id} não ficou ok em {timeout}s")
             time.sleep(intervalo)

@@ -122,6 +122,39 @@ def test_csv_so_cabecalho_retorna_lista_vazia(monkeypatch, busca):
     assert busca.buscar("encanador", "Vitória", "gosom", lat="1", lon="2", intervalo=0) == []
 
 
+@pytest.mark.parametrize("status", ["failed", "error", "cancelled", "canceled"])
+def test_status_terminal_de_falha_levanta_sem_esperar_prazo(monkeypatch, busca, status):
+    chamadas = roteiro(monkeypatch, busca, [POST_OK, (200, json.dumps({"ID": "j1", "Status": status}).encode())])
+    with pytest.raises(busca.SourceError):
+        busca.buscar("x", "y", "gosom", lat="1", lon="2", timeout=1200, intervalo=0)
+    assert [m for m, _, _ in chamadas] == ["POST", "GET"]
+
+
+def test_nota_e_avaliacoes_nao_numericas_viram_none(monkeypatch, busca):
+    roteiro(monkeypatch, busca, [POST_OK, JOB_OK, csv_resp(linha(title="Loja", data_id="0x1:0x2", review_rating="N/A", review_count="N/A"))])
+    leads = busca.buscar("x", "y", "gosom", lat="1", lon="2", intervalo=0)
+    assert (leads[0]["nota"], leads[0]["avaliacoes"]) == (None, None)
+
+
+class Relogio:
+    def __init__(self):
+        self.t = 0.0
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, segundos):
+        self.t += segundos
+
+
+def test_status_ok_no_ciclo_apos_o_prazo_e_aceito(monkeypatch, busca):
+    monkeypatch.setattr(busca, "time", Relogio())  # sleep avança o relógio além do prazo (5s)
+    chamadas = roteiro(monkeypatch, busca, [POST_OK, JOB_PENDENTE, JOB_OK, csv_resp(linha(title="Loja", data_id="0x1:0x2"))])
+    leads = busca.buscar("x", "y", "gosom", lat="1", lon="2", timeout=5, intervalo=10)
+    assert [lead["nome"] for lead in leads] == ["Loja"]
+    assert len(chamadas) == 4
+
+
 def test_fonte_desconhecida_levanta_value_error(monkeypatch, busca):
     chamadas = roteiro(monkeypatch, busca, [])
     with pytest.raises(ValueError):
