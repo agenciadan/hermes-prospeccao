@@ -64,16 +64,26 @@ def test_css_malicioso_do_design_md_nao_sai_do_style(site, tmp_path):
     # o parser descarta valor de cor inválido; o exportador só reproduz o NOME da chave, sem escape
     design = tmp_path / "design.md"
     design.write_text('---\ncolors:\n  "a</style><script>alert(1)</script>": "#0a0"\n---\n')
-    with pytest.raises(ValueError, match="css-vars seguro"):
+    with pytest.raises(ValueError, match="css-vars seguro") as erro:
+        site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
+    assert "chave" in str(erro.value)
+    assert all(c in str(erro.value) for c in "&/\\;()<>'\"")
+    assert not (tmp_path / "out" / "index.html").exists()
+
+
+@pytest.mark.parametrize("chave", ['"x\'y"', '"x\\"y"'])
+def test_aspas_na_chave_do_design_md_falham(site, tmp_path, chave):
+    design = tmp_path / "design.md"
+    design.write_text(f"---\ncolors:\n  {chave}: \"#0a0\"\n---\n")
+    with pytest.raises(ValueError, match="chave"):
         site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
     assert not (tmp_path / "out" / "index.html").exists()
 
 
-def test_css_com_aspas_chega_inalterado_ao_style(site, tmp_path):
-    design = tmp_path / "design.md"
-    design.write_text('---\ncolors:\n  "x\'y\\"z": "#0a0"\n---\n')
-    out = site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
-    assert "--color-x'y\"z: #00aa00;" in (out / "index.html").read_text()
+def test_valor_fora_do_css_seguro_aponta_valor(site):
+    with pytest.raises(ValueError, match="valor") as erro:
+        site.valida_tokens(":root {\n  --color-x: a;b;\n}\n")
+    assert "chave" not in str(erro.value)
 
 
 def test_escapa_script_no_nome_do_lead(site, design, tmp_path):

@@ -9,8 +9,18 @@ ROOT = Path(__file__).resolve().parents[2]  # repo; Eleventy e design.md ficam e
 ELEVENTY = ROOT / "node_modules" / ".bin" / "eleventy"
 DESIGN_MD_CLI = ROOT / "node_modules" / "@google" / "design.md" / "dist" / "index.js"
 TEMPLATES = Path(__file__).resolve().parent / "templates"
-# o exportador repete o nome das chaves do design.md sem escape; o template usa | safe, então só CSS puro passa
-CSS_VARS_SEGURO = re.compile(r":root \{\n(  --[\w'\"-]+: [\w#.%-]+;\n)*\}\s*")  # \s*: console.log põe \n extra
+# barreira contra XSS: o exportador repete chaves e valores do design.md sem escape; o template usa | safe
+CSS_VARS_SEGURO = re.compile(r":root \{\n(  --[\w-]+: [\w#.%-]+;\n)*\}\s*")  # \s*: console.log põe \n extra
+PROIBIDOS = "& / \\ ; ( ) < > ' \""
+
+
+def valida_tokens(tokens: str) -> None:
+    if CSS_VARS_SEGURO.fullmatch(tokens):
+        return
+    # a mensagem diz se saiu a chave ou o valor (a chave é o que vem antes de ': ' em cada linha)
+    chaves = re.findall(r"^  --(.*?): ", tokens, re.M)
+    campo = "chave" if any(not re.fullmatch(r"[\w-]+", c) for c in chaves) else "valor"
+    raise ValueError(f"{campo} dos tokens do design.md fora do css-vars seguro (proibido: {PROIBIDOS})")
 
 
 def gerar_site(lead: dict, template: str, design_md: Path, refs: list[str], saida: Path) -> Path:
@@ -24,8 +34,7 @@ def gerar_site(lead: dict, template: str, design_md: Path, refs: list[str], said
     tokens = subprocess.run(
         ["node", str(DESIGN_MD_CLI), "export", "--format", "css-vars", str(design_md)],
         check=True, capture_output=True, text=True).stdout
-    if not CSS_VARS_SEGURO.fullmatch(tokens):
-        raise ValueError("tokens do design.md fora do css-vars seguro: chaves com <, >, {, } ou espaços")
+    valida_tokens(tokens)
 
     with tempfile.TemporaryDirectory() as work:
         src = Path(work) / "src"
