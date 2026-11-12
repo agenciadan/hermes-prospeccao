@@ -1,0 +1,8 @@
+name: prospeccao
+version: 0.1.0
+description: "Prospecção fria de sites: busca de negócios, classificação, landing pages, publicação e rascunhos de contato. Scaffold: pane e /health."
+author: Dan
+license: MIT
+requires_hermes: ">=0.21"
+provides_tools: []
+provides_hooks: []
