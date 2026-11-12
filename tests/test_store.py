@@ -20,6 +20,14 @@ def db(tmp_path, store):
     return path
 
 
+def _sql(db, query):  # lê a tabela direto: list_leads esconderia linha fantasma
+    con = sqlite3.connect(db)
+    try:
+        return con.execute(query).fetchall()
+    finally:
+        con.close()
+
+
 def test_upsert_nao_duplica(store, db):
     lead = {"place_id": "p1", "nome": "A", "nota": None}
     store.upsert_leads(db, [lead])
@@ -74,17 +82,19 @@ def test_optout_antes_do_lead_sobrevive_ao_upsert(store, db):
 
 
 def test_place_id_ausente_ou_none_levanta_sem_gravar_lote(store, db):
-    for bad in ({"nome": "X"}, {"place_id": None, "nome": "X"}, {"place_id": "", "nome": "X"}):
+    for bad in ({"nome": "X"}, {"place_id": None, "nome": "X"}, {"place_id": "", "nome": "X"},
+                {"place_id": "   ", "nome": "X"}):
         with pytest.raises(ValueError):
             store.upsert_leads(db, [{"place_id": "ok", "nome": "A"}, bad])
-        assert store.list_leads(db, {}) == []
+        assert _sql(db, "SELECT COUNT(*) FROM leads") == [(0,)]
+        assert _sql(db, "SELECT place_id FROM leads WHERE place_id='ok'") == []
 
 
 def test_mark_optout_com_place_id_none_ou_vazio_levanta(store, db):
-    for bad in (None, ""):
+    for bad in (None, "", "   "):
         with pytest.raises(ValueError):
             store.mark_optout(db, bad)
-    assert store.list_leads(db, {}) == []
+    assert _sql(db, "SELECT COUNT(*) FROM leads") == [(0,)]
 
 
 def test_fantasma_de_optout_fica_oculto_na_listagem_mas_gravado(store, db):
@@ -117,3 +127,8 @@ def test_filtro_nota_none_retorna_nota_null(store, db):
     store.upsert_leads(db, [{"place_id": "p1", "nome": "A", "nota": None},
                             {"place_id": "p2", "nome": "B", "nota": 4.0}])
     assert [l["place_id"] for l in store.list_leads(db, {"nota": None})] == ["p1"]
+
+
+def test_lead_sem_nome_e_sem_optout_aparece_na_listagem(store, db):
+    store.upsert_leads(db, [{"place_id": "p1", "nota": 4.0}])  # sem nome e sem opt-out: visível
+    assert [l["place_id"] for l in store.list_leads(db, {})] == ["p1"]

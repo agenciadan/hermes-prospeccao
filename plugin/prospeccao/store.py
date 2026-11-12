@@ -18,6 +18,10 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _vazio(place_id):  # só espaços conta como vazio
+    return place_id is None or str(place_id).strip() == ""
+
+
 def _connect(path):
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
@@ -30,7 +34,7 @@ def init_db(path):
 
 
 def upsert_leads(path, leads):
-    if any(lead.get("place_id") in (None, "") for lead in leads):  # valida o lote antes de gravar qualquer linha
+    if any(_vazio(lead.get("place_id")) for lead in leads):  # valida o lote antes de gravar qualquer linha
         raise ValueError("place_id ausente, None ou vazio")
     now = _now()
     with closing(_connect(path)) as con, con:
@@ -70,7 +74,7 @@ def set_status(path, place_id, status):
 
 
 def mark_optout(path, place_id):
-    if place_id in (None, ""):
+    if _vazio(place_id):
         raise ValueError("place_id ausente, None ou vazio")
     with closing(_connect(path)) as con, con:
         # insere se o lead ainda não existe: o opt-out precisa sobreviver a uma busca posterior
