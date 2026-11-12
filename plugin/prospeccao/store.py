@@ -11,6 +11,7 @@ COLUMNS = ("place_id", "nome", "nicho", "cidade", "nota", "avaliacoes", "site_ur
            "telefone", "email", "fonte", "status", "optout", "updated_at")
 # status/optout só mudam por set_status/mark_optout: um upsert de busca não pode reabrir opt-out.
 UPSERT_COLUMNS = tuple(c for c in COLUMNS if c not in ("status", "optout", "updated_at"))
+VALID_STATUS = ("novo", "rascunho", "aprovado", "enviado", "respondeu", "erro")
 
 
 def _now():
@@ -29,11 +30,13 @@ def init_db(path):
 
 
 def upsert_leads(path, leads):
+    if any(lead.get("place_id") is None for lead in leads):  # valida o lote antes de gravar qualquer linha
+        raise ValueError("place_id ausente ou None")
     now = _now()
     with closing(_connect(path)) as con, con:
         for lead in leads:
-            # campos None não entram no INSERT/UPDATE: não medido preserva o valor anterior
-            row = {k: lead[k] for k in UPSERT_COLUMNS if k in lead and lead[k] is not None}
+            # None e "" não entram no INSERT/UPDATE: não medido/vazio preserva o valor anterior
+            row = {k: lead[k] for k in UPSERT_COLUMNS if k in lead and lead[k] not in (None, "")}
             row["place_id"] = lead["place_id"]
             row["updated_at"] = now
             sets = ", ".join(f"{k}=excluded.{k}" for k in row if k != "place_id")
@@ -48,19 +51,28 @@ def list_leads(path, filters):
     unknown = set(filters) - set(COLUMNS)
     if unknown:
         raise ValueError(f"filtro desconhecido: {sorted(unknown)}")
-    where = " AND ".join(f"{k}=?" for k in filters)
+    where = " AND ".join(f"{k} IS NULL" if v is None else f"{k}=?" for k, v in filters.items())
+    params = [v for v in filters.values() if v is not None]
     sql = "SELECT * FROM leads" + (f" WHERE {where}" if where else "")
     with closing(_connect(path)) as con:
-        return [dict(r) for r in con.execute(sql, list(filters.values())).fetchall()]
+        return [dict(r) for r in con.execute(sql, params).fetchall()]
 
 
 def set_status(path, place_id, status):
+    if status not in VALID_STATUS:
+        raise ValueError(f"status inválido: {status!r}")
     with closing(_connect(path)) as con, con:
-        con.execute("UPDATE leads SET status=?, updated_at=? WHERE place_id=?",
-                    (status, _now(), place_id))
+        cur = con.execute("UPDATE leads SET status=?, updated_at=? WHERE place_id=?",
+                          (status, _now(), place_id))
+        if cur.rowcount == 0:  # sem isso, o erro some em silêncio
+            raise ValueError(f"place_id inexistente: {place_id!r}")
 
 
 def mark_optout(path, place_id):
+    if place_id is None:
+        raise ValueError("place_id ausente ou None")
     with closing(_connect(path)) as con, con:
-        con.execute("UPDATE leads SET optout=1, updated_at=? WHERE place_id=?",
-                    (_now(), place_id))
+        # insere se o lead ainda não existe: o opt-out precisa sobreviver a uma busca posterior
+        con.execute("INSERT INTO leads (place_id, optout, updated_at) VALUES (?, 1, ?) "
+                    "ON CONFLICT(place_id) DO UPDATE SET optout=1, updated_at=excluded.updated_at",
+                    (place_id, _now()))

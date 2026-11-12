@@ -64,3 +64,46 @@ def test_set_status_e_filtro(store, db):
 def test_filtro_com_coluna_desconhecida_falha(store, db):
     with pytest.raises(ValueError):
         store.list_leads(db, {"nome; DROP TABLE leads": "x"})
+
+
+def test_optout_antes_do_lead_sobrevive_ao_upsert(store, db):
+    store.mark_optout(db, "p1")  # lead ainda não existe: mark_optout insere a linha
+    store.upsert_leads(db, [{"place_id": "p1", "nome": "A"}])
+    assert store.list_leads(db, {})[0]["optout"] == 1
+
+
+def test_place_id_ausente_ou_none_levanta_sem_gravar_lote(store, db):
+    for bad in ({"nome": "X"}, {"place_id": None, "nome": "X"}):
+        with pytest.raises(ValueError):
+            store.upsert_leads(db, [{"place_id": "ok", "nome": "A"}, bad])
+        assert store.list_leads(db, {}) == []
+
+
+def test_mark_optout_com_place_id_none_levanta(store, db):
+    with pytest.raises(ValueError):
+        store.mark_optout(db, None)
+    assert store.list_leads(db, {}) == []
+
+
+def test_set_status_invalido_levanta(store, db):
+    store.upsert_leads(db, [{"place_id": "p1", "nome": "A"}])
+    with pytest.raises(ValueError):
+        store.set_status(db, "p1", "qualquer")
+    assert store.list_leads(db, {})[0]["status"] == "novo"
+
+
+def test_set_status_id_inexistente_levanta(store, db):
+    with pytest.raises(ValueError):
+        store.set_status(db, "nao-existe", "enviado")
+
+
+def test_upsert_com_telefone_vazio_nao_apaga_telefone(store, db):
+    store.upsert_leads(db, [{"place_id": "p1", "nome": "A", "telefone": "11999"}])
+    store.upsert_leads(db, [{"place_id": "p1", "nome": "A", "telefone": ""}])
+    assert store.list_leads(db, {})[0]["telefone"] == "11999"
+
+
+def test_filtro_nota_none_retorna_nota_null(store, db):
+    store.upsert_leads(db, [{"place_id": "p1", "nome": "A", "nota": None},
+                            {"place_id": "p2", "nome": "B", "nota": 4.0}])
+    assert [l["place_id"] for l in store.list_leads(db, {"nota": None})] == ["p1"]
