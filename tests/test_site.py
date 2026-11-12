@@ -1,0 +1,50 @@
+import importlib
+from pathlib import Path
+
+import pytest
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent / "plugin"
+
+
+@pytest.fixture
+def site(monkeypatch):
+    monkeypatch.syspath_prepend(str(PLUGIN_ROOT))  # restaurado ao fim do teste
+    return importlib.import_module("prospeccao.site")
+
+
+@pytest.fixture
+def design(tmp_path):
+    path = tmp_path / "design.md"
+    path.write_text("# cor: #0a0")
+    return path
+
+
+def test_gera_index_com_nome_do_lead(site, design, tmp_path):
+    out = site.gerar_site({"nome": "Encanador X"}, "basico", design, [], tmp_path / "out")
+    assert "Encanador X" in (out / "index.html").read_text()
+
+
+def test_escapa_nome_do_lead_no_html(site, design, tmp_path):
+    out = site.gerar_site({"nome": "A & <b>x</b>"}, "basico", design, [], tmp_path / "out")
+    html = (out / "index.html").read_text()
+    assert "A &amp; &lt;b&gt;x&lt;/b&gt;" in html
+    assert "<b>x</b>" not in html
+
+
+def test_design_md_ausente_falha(site, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        site.gerar_site({"nome": "X"}, "basico", tmp_path / "nao.md", [], tmp_path / "out")
+
+
+def test_copia_tokens_e_refs(site, design, tmp_path):
+    ref = tmp_path / "ref.txt"
+    ref.write_text("referencia")
+    out = site.gerar_site({"nome": "X"}, "basico", design, [str(ref)], tmp_path / "out")
+    assert (out / "tokens.css").exists()
+    assert (out / "refs" / "ref.txt").read_text() == "referencia"
+
+
+def test_eleventy_ausente_falha_com_mensagem_clara(site, design, tmp_path, monkeypatch):
+    monkeypatch.setattr(site, "ELEVENTY", tmp_path / "nao-instalado")
+    with pytest.raises(RuntimeError, match="npm install"):
+        site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
