@@ -216,3 +216,53 @@ def test_nao_publica_symlink_nem_pasta_linkada(mod, tmp_path, pasta):
     (pasta / "pasta_link").symlink_to(fora)
     coletados = mod._coletar(pasta)
     assert set(coletados) == {"index.html", "refs/a.txt"}
+
+
+def _erro_http_com_corpo(corpo):
+    return urllib.error.HTTPError("u", 500, "boom", {}, io.BytesIO(corpo))
+
+
+@pytest.mark.parametrize("padding", [290, 296, 298])
+def test_token_que_cruza_o_corte_do_corpo_nao_vaza(mod, monkeypatch, padding):
+    token = "TOKEN_SECRETO_123"
+    erro = _erro_http_com_corpo(b"x" * padding + token.encode() + b" fim")
+
+    def falha(*a, **k):
+        raise erro
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", falha)
+    with pytest.raises(mod.PublishError) as info:
+        mod._http("POST", "https://api.vercel.com/v2/files", token, b"", {})
+    msg = str(info.value)
+    assert token not in msg
+    assert not any(token[:n] in msg for n in range(4, len(token) + 1))
+
+
+def test_cloudflare_errors_nao_vaza_token(mod, monkeypatch, pasta):
+    token = "TOKEN_SECRETO_123"
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", token)
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "conta123")
+    resp = {"success": False, "errors": [{"code": 10000, "message": f"token {token} invalido"}]}
+    monkeypatch.setattr(mod, "_http", lambda *a: json.dumps(resp).encode())
+    with pytest.raises(mod.PublishError) as info:
+        mod.publicar(pasta, "cloudflare", "x")
+    assert token not in str(info.value)
+    assert "***" in str(info.value)
+
+
+def test_token_vazio_nao_intercala_mascara(mod, monkeypatch):
+    def http_500(*a, **k):
+        raise _erro_http_com_corpo(b"abc")
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", http_500)
+    with pytest.raises(mod.PublishError) as info:
+        mod._http("POST", "https://api.vercel.com/v2/files", "", b"", {})
+    assert "abc" in str(info.value)
+
+    def sem_rede(*a, **k):
+        raise urllib.error.URLError("sem rota")
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", sem_rede)
+    with pytest.raises(mod.PublishError) as info:
+        mod._http("POST", "https://api.vercel.com/v2/files", "", b"", {})
+    assert "sem rota" in str(info.value)

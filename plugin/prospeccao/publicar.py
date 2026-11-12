@@ -59,7 +59,7 @@ def _cloudflare(arquivos: dict, projeto: str) -> dict:
            f"/pages/projects/{quote(projeto, safe='')}/deployments")
     resp = _json(_http("POST", url, token, corpo, {"Content-Type": tipo}))
     if not resp.get("success"):
-        raise PublishError(f"cloudflare: {resp.get('errors')}")
+        raise PublishError(f"cloudflare: {_mascarar(str(resp.get('errors')), token)}")
     return {"url": (resp.get("result") or {}).get("url")}
 
 
@@ -109,10 +109,14 @@ def _http(metodo: str, url: str, token: str, corpo: bytes, cabecalhos: dict) -> 
         with urllib.request.urlopen(req, timeout=120) as r:
             return r.read()
     except urllib.error.HTTPError as e:  # corpo de erro pode ecoar o token: nunca sai na mensagem (R38)
-        corpo_erro = e.read()[:300].decode("utf-8", "replace").replace(token, "***")
+        corpo_erro = _mascarar(e.read().decode("utf-8", "replace"), token)[:300]  # mascara antes do corte: token na fronteira vazaria
         raise PublishError(f"HTTP {e.code} em {url}: {corpo_erro}") from None
     except (OSError, http.client.HTTPException) as e:  # URLError e timeout são OSError
-        raise PublishError(f"falha de rede em {url}: {str(e).replace(token, '***')}") from None
+        raise PublishError(f"falha de rede em {url}: {_mascarar(str(e), token)}") from None
+
+
+def _mascarar(texto: str, token: str) -> str:
+    return texto.replace(token, "***") if token else texto  # token vazio: replace('', ...) intercalaria ***
 
 
 def _json(raw: bytes) -> dict:
