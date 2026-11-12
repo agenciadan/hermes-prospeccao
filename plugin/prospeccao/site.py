@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -8,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]  # repo; Eleventy e design.md ficam e
 ELEVENTY = ROOT / "node_modules" / ".bin" / "eleventy"
 DESIGN_MD_CLI = ROOT / "node_modules" / "@google" / "design.md" / "dist" / "index.js"
 TEMPLATES = Path(__file__).resolve().parent / "templates"
+# o exportador repete o nome das chaves do design.md sem escape; o template usa | safe, então só CSS puro passa
+CSS_VARS_SEGURO = re.compile(r":root \{\n(  --[\w'\"-]+: [\w#.%-]+;\n)*\}\s*")  # \s*: console.log põe \n extra
 
 
 def gerar_site(lead: dict, template: str, design_md: Path, refs: list[str], saida: Path) -> Path:
@@ -21,6 +24,8 @@ def gerar_site(lead: dict, template: str, design_md: Path, refs: list[str], said
     tokens = subprocess.run(
         ["node", str(DESIGN_MD_CLI), "export", "--format", "css-vars", str(design_md)],
         check=True, capture_output=True, text=True).stdout
+    if not CSS_VARS_SEGURO.fullmatch(tokens):
+        raise ValueError("tokens do design.md fora do css-vars seguro: chaves com <, >, {, } ou espaços")
 
     with tempfile.TemporaryDirectory() as work:
         src = Path(work) / "src"
