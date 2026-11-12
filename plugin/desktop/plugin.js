@@ -253,7 +253,7 @@ export default {
       id: 'prospeccao',
       area: 'panes',
       title: TITULO,
-      data: { title: TITULO, placement: 'main' },
+      data: { title: TITULO, placement: 'right', width: '420px' },
       render: () => h(ProspeccaoPane, { ctx }),
     });
   },
