@@ -76,17 +76,25 @@ def _multipart(manifesto: str, blobs: dict) -> tuple[bytes, str]:
 
 
 def _coletar(pasta: Path) -> dict:
-    # symlink fica de fora: um link para arquivo local vazaria na publicação
-    return {p.relative_to(pasta).as_posix(): p.read_bytes()
-            for p in sorted(pasta.rglob("*")) if p.is_file() and not p.is_symlink()}
+    # symlink fica de fora (link para arquivo local vazaria); dotfiles e pastas ocultas (.env, .git) também
+    arquivos = {}
+    for p in sorted(pasta.rglob("*")):
+        rel = p.relative_to(pasta)
+        if p.is_file() and not p.is_symlink() and not any(parte.startswith(".") for parte in rel.parts):
+            arquivos[rel.as_posix()] = p.read_bytes()
+    return arquivos
 
 
 def _segredo(nome: str) -> str:
     valor = os.environ.get(nome)
     env = Path.home() / ".hermes" / ".env"
     if not valor and env.is_file():
-        for linha in env.read_text(encoding="utf-8").splitlines():
-            chave, sep, bruto = linha.partition("=")
+        try:
+            linhas = env.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):  # sem citar o conteúdo: o erro pode trazer bytes do segredo
+            raise PublishError(f"não foi possível ler {env}") from None
+        for linha in linhas:
+            chave, sep, bruto = linha.strip().removeprefix("export ").partition("=")
             if sep and chave.strip() == nome:
                 valor = bruto.strip().strip("'\"")
     if not valor:
@@ -100,10 +108,11 @@ def _http(metodo: str, url: str, token: str, corpo: bytes, cabecalhos: dict) -> 
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             return r.read()
-    except urllib.error.HTTPError as e:
-        raise PublishError(f"HTTP {e.code} em {url}: {e.read()[:300].decode('utf-8', 'replace')}") from None
+    except urllib.error.HTTPError as e:  # corpo de erro pode ecoar o token: nunca sai na mensagem (R38)
+        corpo_erro = e.read()[:300].decode("utf-8", "replace").replace(token, "***")
+        raise PublishError(f"HTTP {e.code} em {url}: {corpo_erro}") from None
     except (OSError, http.client.HTTPException) as e:  # URLError e timeout são OSError
-        raise PublishError(f"falha de rede em {url}: {e}") from None
+        raise PublishError(f"falha de rede em {url}: {str(e).replace(token, '***')}") from None
 
 
 def _json(raw: bytes) -> dict:

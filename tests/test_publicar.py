@@ -56,11 +56,69 @@ def test_provedor_desconhecido_nao_envia(mod, monkeypatch, pasta):
 
 
 def test_pasta_sem_index_falha_antes_do_envio(mod, monkeypatch, tmp_path):
-    monkeypatch.setattr(mod, "_http", lambda *a: pytest.fail("não deveria enviar"))
+    monkeypatch.setenv("VERCEL_TOKEN", "tok-teste")  # com token, só o guard de index.html impede o envio
+    (tmp_path / "sobra.txt").write_text("x")
+    chamadas = []
+    monkeypatch.setattr(mod, "_http", lambda *a: chamadas.append(a) or b"{}")
     with pytest.raises(mod.PublishError, match="index.html"):
         mod.publicar(tmp_path, "vercel", "x")
     with pytest.raises(mod.PublishError, match="index.html"):
         mod.publicar(tmp_path / "nao-existe", "vercel", "x")
+    assert chamadas == []
+
+
+def test_nao_publica_dotfiles_nem_pastas_ocultas(mod, monkeypatch, pasta):
+    monkeypatch.setenv("VERCEL_TOKEN", "tok-teste")
+    (pasta / ".env").write_text("VERCEL_TOKEN=segredo-de-dotenv")
+    (pasta / ".git").mkdir()
+    (pasta / ".git" / "config").write_text("[remote \"origin\"]")
+    enviados = []
+    monkeypatch.setattr(mod, "_http", lambda m, u, t, corpo, c: enviados.append(corpo) or b'{"url": "x.vercel.app"}')
+    mod.publicar(pasta, "vercel", "x")
+    deploy = json.loads(enviados[-1])
+    assert {f["file"] for f in deploy["files"]} == {"index.html", "refs/a.txt"}
+    assert b"segredo-de-dotenv" not in b"".join(enviados)
+
+
+def test_segredo_reconhece_export(mod, tmp_path):
+    env = tmp_path / "casa" / ".hermes" / ".env"
+    env.parent.mkdir(parents=True)
+    env.write_text("export VERCEL_TOKEN='tok-export'\n")
+    assert mod._segredo("VERCEL_TOKEN") == "tok-export"
+
+
+def test_env_ilegivel_vira_publish_error_sem_vazar(mod, tmp_path):
+    env = tmp_path / "casa" / ".hermes" / ".env"
+    env.parent.mkdir(parents=True)
+    env.write_bytes(b"VERCEL_TOKEN=tok-\xff-secreto\n")
+    with pytest.raises(mod.PublishError) as erro:
+        mod._segredo("VERCEL_TOKEN")
+    assert "tok-" not in str(erro.value) and "secreto" not in str(erro.value)
+
+
+def _erro_401(token):
+    return urllib.error.HTTPError("u", 401, "unauthorized", {}, io.BytesIO(f"Bearer {token} recusado".encode()))
+
+
+def _erro_500(token):
+    return urllib.error.HTTPError("u", 500, "boom", {}, io.BytesIO(f"erro com {token}".encode()))
+
+
+def _sem_rede(token):
+    return urllib.error.URLError(f"sem rota ({token})")
+
+
+@pytest.mark.parametrize("erro", [_erro_401, _erro_500, _sem_rede])
+def test_mensagem_de_erro_nao_vaza_token(mod, monkeypatch, erro):
+    token = "TOKEN_SECRETO_123"
+
+    def falha(*a, **k):
+        raise erro(token)
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", falha)
+    with pytest.raises(mod.PublishError) as info:
+        mod._http("POST", "https://api.vercel.com/v2/files", token, b"", {})
+    assert token not in str(info.value)
 
 
 @pytest.mark.parametrize("provedor, ambiente, nome", [
