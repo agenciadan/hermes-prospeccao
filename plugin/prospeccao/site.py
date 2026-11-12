@@ -27,11 +27,12 @@ def gerar_site(lead: dict, template: str, design_md: Path, refs: list[str], said
         shutil.copytree(TEMPLATES / template, src)
         (src / "_data").mkdir()
         (src / "_data" / "lead.json").write_text(json.dumps(lead, ensure_ascii=False))
+        (src / "_data" / "design.json").write_text(json.dumps({"css": tokens}))
         subprocess.run([str(ELEVENTY), "--input", str(src), "--output", str(saida)],
                        check=True, cwd=work)
 
     (saida / "tokens.css").write_text(tokens)
     (saida / "refs").mkdir(exist_ok=True)
-    for ref in refs:
+    for ref in refs:  # R30: só os arquivos listados pelo chamador; nunca diretório
         shutil.copy(ref, saida / "refs")
     return saida

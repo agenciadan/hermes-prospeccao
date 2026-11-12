@@ -48,3 +48,36 @@ def test_eleventy_ausente_falha_com_mensagem_clara(site, design, tmp_path, monke
     monkeypatch.setattr(site, "ELEVENTY", tmp_path / "nao-instalado")
     with pytest.raises(RuntimeError, match="npm install"):
         site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
+
+
+def test_tokens_do_design_md_chegam_ao_index(site, tmp_path):
+    design = tmp_path / "design.md"
+    design.write_text('---\ncolors:\n  primary: "#1A7F37"\n---\n# Teste\n')
+    out = site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
+    html = (out / "index.html").read_text()
+    assert "--color-primary: #1a7f37" in html
+    assert "var(--color-primary)" in html
+    assert "var(--font-body" in html
+
+
+def test_css_malicioso_do_design_md_nao_sai_do_style(site, tmp_path):
+    design = tmp_path / "design.md"
+    design.write_text('---\ncolors:\n  primary: "#1A7F37</style><script>alert(1)</script>"\n---\n')
+    out = site.gerar_site({"nome": "X"}, "basico", design, [], tmp_path / "out")
+    assert "<script>alert(1)" not in (out / "index.html").read_text()
+
+
+def test_escapa_script_no_nome_do_lead(site, design, tmp_path):
+    out = site.gerar_site({"nome": "<script>alert(1)</script>"}, "basico", design, [], tmp_path / "out")
+    html = (out / "index.html").read_text()
+    assert "<script>alert(1)" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_refs_so_copia_arquivos_listados(site, design, tmp_path):
+    pasta = tmp_path / "pasta"
+    pasta.mkdir()
+    (pasta / "a.txt").write_text("a")
+    (pasta / "b.txt").write_text("b")
+    out = site.gerar_site({"nome": "X"}, "basico", design, [str(pasta / "a.txt")], tmp_path / "out")
+    assert sorted(p.name for p in (out / "refs").iterdir()) == ["a.txt"]
