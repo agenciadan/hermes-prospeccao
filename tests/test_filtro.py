@@ -43,6 +43,15 @@ def test_site_url_vazio_nao_existe_e_e_none(filtro):
     assert filtro.classificar({"site_url": ""})["tem_site"] is None
 
 
+def test_site_url_so_espacos_nao_existe_e_e_none(filtro):
+    assert filtro.classificar({"site_url": "  "})["tem_site"] is None
+
+
+def test_site_url_vazio_ou_so_espacos_com_verificado_true_e_false(filtro):
+    for site in ("", "  "):
+        assert filtro.classificar({"site_url": site, "verificado_site": True})["tem_site"] is False
+
+
 def test_sem_site_false_nao_filtra(filtro):
     leads = [{"site_url": "https://a.com.br"}, {"site_url": None}]
     assert filtro.filtrar(leads, {"sem_site": False}) == leads

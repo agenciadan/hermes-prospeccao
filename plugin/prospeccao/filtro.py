@@ -2,7 +2,7 @@
 
 
 def classificar(lead):
-    if lead.get("site_url"):
+    if (lead.get("site_url") or "").strip():  # vazio, só espaços ou None = ausente
         tem_site = True
     elif lead.get("verificado_site") is True:  # só True explícito: verificação confirmou ausência
         tem_site = False
