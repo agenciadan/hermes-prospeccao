@@ -30,8 +30,8 @@ def init_db(path):
 
 
 def upsert_leads(path, leads):
-    if any(lead.get("place_id") is None for lead in leads):  # valida o lote antes de gravar qualquer linha
-        raise ValueError("place_id ausente ou None")
+    if any(lead.get("place_id") in (None, "") for lead in leads):  # valida o lote antes de gravar qualquer linha
+        raise ValueError("place_id ausente, None ou vazio")
     now = _now()
     with closing(_connect(path)) as con, con:
         for lead in leads:
@@ -51,9 +51,10 @@ def list_leads(path, filters):
     unknown = set(filters) - set(COLUMNS)
     if unknown:
         raise ValueError(f"filtro desconhecido: {sorted(unknown)}")
-    where = " AND ".join(f"{k} IS NULL" if v is None else f"{k}=?" for k, v in filters.items())
+    conds = [f"{k} IS NULL" if v is None else f"{k}=?" for k, v in filters.items()]
+    conds.append("NOT (nome IS NULL AND optout=1)")  # fantasma de opt-out (lead ainda não buscado): gravado, mas oculto
     params = [v for v in filters.values() if v is not None]
-    sql = "SELECT * FROM leads" + (f" WHERE {where}" if where else "")
+    sql = "SELECT * FROM leads WHERE " + " AND ".join(conds)
     with closing(_connect(path)) as con:
         return [dict(r) for r in con.execute(sql, params).fetchall()]
 
@@ -69,8 +70,8 @@ def set_status(path, place_id, status):
 
 
 def mark_optout(path, place_id):
-    if place_id is None:
-        raise ValueError("place_id ausente ou None")
+    if place_id in (None, ""):
+        raise ValueError("place_id ausente, None ou vazio")
     with closing(_connect(path)) as con, con:
         # insere se o lead ainda não existe: o opt-out precisa sobreviver a uma busca posterior
         con.execute("INSERT INTO leads (place_id, optout, updated_at) VALUES (?, 1, ?) "

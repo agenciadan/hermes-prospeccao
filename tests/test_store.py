@@ -1,4 +1,5 @@
 import importlib
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -73,16 +74,25 @@ def test_optout_antes_do_lead_sobrevive_ao_upsert(store, db):
 
 
 def test_place_id_ausente_ou_none_levanta_sem_gravar_lote(store, db):
-    for bad in ({"nome": "X"}, {"place_id": None, "nome": "X"}):
+    for bad in ({"nome": "X"}, {"place_id": None, "nome": "X"}, {"place_id": "", "nome": "X"}):
         with pytest.raises(ValueError):
             store.upsert_leads(db, [{"place_id": "ok", "nome": "A"}, bad])
         assert store.list_leads(db, {}) == []
 
 
-def test_mark_optout_com_place_id_none_levanta(store, db):
-    with pytest.raises(ValueError):
-        store.mark_optout(db, None)
+def test_mark_optout_com_place_id_none_ou_vazio_levanta(store, db):
+    for bad in (None, ""):
+        with pytest.raises(ValueError):
+            store.mark_optout(db, bad)
     assert store.list_leads(db, {}) == []
+
+
+def test_fantasma_de_optout_fica_oculto_na_listagem_mas_gravado(store, db):
+    store.mark_optout(db, "p1")  # lead ainda não buscado: linha só com optout
+    assert store.list_leads(db, {}) == []
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT optout FROM leads WHERE place_id='p1'").fetchone() == (1,)
+    con.close()
 
 
 def test_set_status_invalido_levanta(store, db):
