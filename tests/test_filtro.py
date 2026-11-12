@@ -29,6 +29,31 @@ def test_site_ausente_verificado_e_false(filtro):
     assert filtro.classificar({"site_url": None, "verificado_site": True})["tem_site"] is False
 
 
+def test_verificado_site_so_conta_se_for_true_explicito(filtro):
+    for valor in ("false", 1, "sim"):
+        assert filtro.classificar({"site_url": None, "verificado_site": valor})["tem_site"] is None
+
+
+def test_verificado_site_truthy_nao_passa_sem_site(filtro):
+    leads = [{"site_url": None, "verificado_site": 1}, {"site_url": None, "verificado_site": "false"}]
+    assert filtro.filtrar(leads, {"sem_site": True}) == []
+
+
+def test_site_url_vazio_nao_existe_e_e_none(filtro):
+    assert filtro.classificar({"site_url": ""})["tem_site"] is None
+
+
+def test_sem_site_false_nao_filtra(filtro):
+    leads = [{"site_url": "https://a.com.br"}, {"site_url": None}]
+    assert filtro.filtrar(leads, {"sem_site": False}) == leads
+
+
+def test_verificado_site_true_explicito_passa_sem_site(filtro):
+    lead = {"site_url": None, "verificado_site": True}
+    assert filtro.classificar(lead)["tem_site"] is False
+    assert filtro.filtrar([lead], {"sem_site": True}) == [lead]
+
+
 def test_classificar_nao_altera_o_lead_de_entrada(filtro):
     lead = {"site_url": None, "verificado_site": True}
     filtro.classificar(lead)

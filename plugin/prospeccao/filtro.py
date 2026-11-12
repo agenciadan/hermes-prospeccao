@@ -4,7 +4,7 @@
 def classificar(lead):
     if lead.get("site_url"):
         tem_site = True
-    elif lead.get("verificado_site"):  # verificação rodou e confirmou ausência
+    elif lead.get("verificado_site") is True:  # só True explícito: verificação confirmou ausência
         tem_site = False
     else:
         tem_site = None
