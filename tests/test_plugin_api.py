@@ -1,8 +1,6 @@
 import importlib.util
-import sys
 from pathlib import Path
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -27,10 +25,9 @@ def test_health_returns_ok():
     assert response.json() == {"ok": True}
 
 
-def test_host_descobre_plugin(tmp_path):
-    if not HOST_ROOT.is_dir():
-        pytest.skip(f"host Hermes ausente: {HOST_ROOT}")
-    sys.path.insert(0, str(HOST_ROOT))
+def test_host_descobre_plugin(tmp_path, monkeypatch):
+    assert HOST_ROOT.is_dir(), "host Hermes não encontrado em ~/.hermes/hermes-agent"
+    monkeypatch.syspath_prepend(str(HOST_ROOT))  # restaurado ao fim do teste
     from hermes_cli.web_server_dashboard import _discover_dashboard_plugins
 
     plugins_dir = tmp_path / "plugins"
